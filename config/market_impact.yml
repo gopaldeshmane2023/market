@@ -1,0 +1,97 @@
+# TradeSentinel — global market impact configuration.
+#
+# HEURISTIC ONLY. The directions and weights below encode rough, widely-used
+# macro relationships for Indian equities. They are NOT universal correlations,
+# they change over time, and they are not statistically fitted.
+#
+# For every factor:
+#   weight          importance in the score (0 = tracked in the report but not scored)
+#   direction       +1 => a RISE is generally positive for Indian equities
+#                   -1 => a RISE is generally negative
+#   full_move_pct   daily % move at which the factor's signal saturates at +/-1
+#   full_move_bp    (kind: yield_bp only) daily move in basis points that saturates the signal
+#   kind            pct       -> uses daily % change of the close
+#                   yield_bp  -> uses daily change in basis points (for yields)
+
+settings:
+  max_age_days: 4            # a latest bar older than this many calendar days is STALE
+  stale_policy: exclude      # exclude | include   (stale factors are excluded from the score by default)
+  min_coverage_pct: 60       # if usable weight / configured weight is below this, no score is produced
+  assessment_thresholds:     # score >= positive => POSITIVE, score <= negative => NEGATIVE, else MIXED
+    positive: 25
+    negative: -25
+  history_period: "20d"      # how much daily history to request from Yahoo
+  tnx_convention: auto       # auto | percent | tenths  (see README: ^TNX quote convention)
+  tnx_max_plausible_daily_move_bp: 60   # a bigger daily move is flagged SUSPECT and excluded
+  sector_threshold: 15       # sector tilt >= +15 => TAILWIND, <= -15 => HEADWIND, else NEUTRAL/MIXED
+
+factors:
+  sp500:   {name: "S&P 500",            ticker: "^GSPC",    weight: 1.0,  direction:  1, kind: pct,      full_move_pct: 2.0}
+  nasdaq:  {name: "Nasdaq Composite",   ticker: "^IXIC",    weight: 1.0,  direction:  1, kind: pct,      full_move_pct: 2.5}
+  dow:     {name: "Dow Jones",          ticker: "^DJI",     weight: 0.5,  direction:  1, kind: pct,      full_move_pct: 1.5}
+  vix:     {name: "VIX",                ticker: "^VIX",     weight: 1.0,  direction: -1, kind: pct,      full_move_pct: 15.0}
+  dxy:     {name: "US Dollar Index",    ticker: "DX-Y.NYB", weight: 1.0,  direction: -1, kind: pct,      full_move_pct: 1.0}
+  brent:   {name: "Brent crude",        ticker: "BZ=F",     weight: 1.5,  direction: -1, kind: pct,      full_move_pct: 3.0}
+  gold:    {name: "Gold",               ticker: "GC=F",     weight: 0.25, direction: -1, kind: pct,      full_move_pct: 2.0}
+  silver:  {name: "Silver",             ticker: "SI=F",     weight: 0.0,  direction:  1, kind: pct,      full_move_pct: 3.0}   # tracked only
+  copper:  {name: "Copper",             ticker: "HG=F",     weight: 0.5,  direction:  1, kind: pct,      full_move_pct: 2.5}
+  usdinr:  {name: "USD/INR",            ticker: "INR=X",    weight: 1.5,  direction: -1, kind: pct,      full_move_pct: 0.5}
+  us10y:   {name: "US 10-year yield",   ticker: "^TNX",     weight: 1.0,  direction: -1, kind: yield_bp, full_move_bp: 15.0}
+
+# Macro risk flags: simple threshold alerts shown in the report (only evaluated on usable data).
+# metric: latest_close | pct_change | change_bp
+risk_flags:
+  - {factor: vix,    metric: latest_close, op: ">=", value: 25,   message: "VIX is at or above 25: elevated US equity stress."}
+  - {factor: vix,    metric: pct_change,   op: ">=", value: 10,   message: "VIX jumped 10%+ in one session: risk-off impulse."}
+  - {factor: brent,  metric: pct_change,   op: ">=", value: 3,    message: "Brent crude rose 3%+: pressure on India's import bill, inflation and OMC/paint/aviation margins."}
+  - {factor: usdinr, metric: pct_change,   op: ">=", value: 0.4,  message: "Rupee weakened 0.4%+ against USD: currency-pressure signal."}
+  - {factor: dxy,    metric: pct_change,   op: ">=", value: 0.7,  message: "Dollar index rose 0.7%+: typically a headwind for emerging-market flows."}
+  - {factor: us10y,  metric: change_bp,    op: ">=", value: 10,   message: "US 10-year yield rose 10bp+: valuation and foreign-flow headwind."}
+  - {factor: sp500,  metric: pct_change,   op: "<=", value: -1.5, message: "S&P 500 fell 1.5%+: weak global risk appetite."}
+  - {factor: nasdaq, metric: pct_change,   op: "<=", value: -2.0, message: "Nasdaq fell 2%+: negative for IT / global-tech-linked sectors."}
+
+# Sector sensitivities (HEURISTIC macro-sensitivity map — NOT current sector performance).
+# Each driver value is the effect on the sector when that factor RISES (+1 helps, -1 hurts, magnitude = strength).
+# The sector tilt = 100 * sum(sensitivity * factor_move_signal) / sum(|sensitivity|) over drivers with usable data.
+sectors:
+  IT:
+    drivers: {nasdaq: 1.0, sp500: 0.5, usdinr: 1.0, us10y: -0.5}
+    note: "Global tech sentiment and a weaker rupee (export revenue) help; higher US yields and US slowdown fears hurt."
+  Pharma:
+    drivers: {usdinr: 0.5, sp500: 0.2}
+    note: "Export-heavy, so a weaker rupee helps; otherwise largely defensive and driven by US FDA/pricing news, not macro."
+  Auto:
+    drivers: {brent: -1.0, usdinr: -0.3, copper: -0.3, sp500: 0.3}
+    note: "Fuel prices affect demand and input costs; metals raise input costs; global risk appetite is a minor factor."
+  Defence:
+    drivers: {gold: 0.3, vix: 0.3, sp500: 0.2}
+    note: "Mostly driven by domestic policy and order books; macro sensitivity is weak. Geopolitical stress can lift sentiment."
+  Metals:
+    drivers: {copper: 1.0, dxy: -0.7, sp500: 0.5, gold: 0.3}
+    note: "Commodity prices and a weaker dollar help; global-growth fears hurt. China demand is not modelled."
+  PSU banks:
+    drivers: {sp500: 0.5, dxy: -0.5, brent: -0.5, vix: -0.5}
+    note: "Domestic credit/rate cycle dominates; global risk-off and higher oil (inflation, rate expectations) are headwinds."
+  Private banks:
+    drivers: {sp500: 0.5, dxy: -0.7, vix: -0.5, us10y: -0.5, usdinr: -0.5}
+    note: "Heavily owned by foreign investors, so dollar strength, higher US yields and risk-off outflows matter."
+  FMCG:
+    drivers: {brent: -0.7, usdinr: -0.3, vix: 0.2}
+    note: "Defensive. Crude-linked packaging/input costs hurt margins; relative strength tends to show in risk-off tapes."
+  Chemicals:
+    drivers: {brent: -0.7, usdinr: 0.3, dxy: -0.2}
+    note: "Crude-derived feedstock costs hurt; exporters gain from a weaker rupee; China pricing is not modelled."
+  Oil and gas:
+    drivers: {brent: 0.3, usdinr: -0.3}
+    ambiguous: true
+    note: "AMBIGUOUS: upstream producers gain from higher crude while OMCs and gas distributors lose. The net sign is weak; check the sub-segment."
+  Realty:
+    drivers: {us10y: -1.0, sp500: 0.3, brent: -0.3}
+    note: "Interest-rate sensitive; higher yields and inflation worries hurt."
+  Electronics:
+    drivers: {nasdaq: 0.7, usdinr: -0.7, copper: -0.3, dxy: -0.3}
+    note: "Global tech demand helps; imported components make a weaker rupee a cost headwind."
+  Jewellery:
+    drivers: {gold: 0.3, usdinr: -0.5, sp500: 0.2}
+    ambiguous: true
+    note: "AMBIGUOUS: rising gold gives inventory gains but can dent volumes; a weaker rupee raises import costs."

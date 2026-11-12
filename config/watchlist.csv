@@ -1,0 +1,7 @@
+# TradeSentinel watchlist — add the NSE symbols you found via Screener.in, one per line.
+# Columns: symbol,exchange,notes     (exchange must be NSE; NSE trading symbol, e.g. M&M, BAJAJ-AUTO)
+# Lines starting with # are ignored. The 3 rows below are SAMPLES ONLY — replace them with your own names.
+symbol,exchange,notes
+RELIANCE,NSE,sample row - replace
+TCS,NSE,sample row - replace
+HDFCBANK,NSE,sample row - replace
