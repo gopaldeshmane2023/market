@@ -1,0 +1,54 @@
+# TradeSentinel — thresholds for technical screening (Phase 3) and risk filtering (Phase 4).
+# Every number here is a configurable threshold. None of them is a guarantee of anything.
+
+nse:
+  max_stale_days: 4            # NSE source date older than this (calendar days) => STALE source warning
+  min_rows_full_market: 500    # a full-market bhavcopy with fewer rows is treated as a failed/partial download
+  circuit_tolerance_pct: 0.15  # price move within this many points of the band counts as "at circuit" (approximation)
+  download_lookback_days: 6    # how many recent weekdays to try when --try-download is used
+
+technical:
+  min_history_bars: 210        # need enough bars for a meaningful EMA200
+  history_period: "2y"         # Yahoo history requested per symbol
+  max_stale_days: 4            # last bar older than this vs. reference date => STALE (cannot be shortlisted)
+  allowed_series: [EQ]         # normal delivery shortlist: EQ only
+  trend_required: true         # EMA20 > EMA50 > EMA200
+  rsi: {min: 50, max: 70}
+  macd_above_signal: true
+  min_relative_volume: 1.5     # latest volume / average of the PRIOR 20 sessions
+  momentum:
+    min_daily_change_pct: 0.0  # latest close vs previous close must exceed this
+    lookback_days: 5
+    min_lookback_return_pct: 0.0
+  price_mismatch_pct: 2.0      # yfinance vs NSE close on the same date differing by more than this => data warning
+  circuit_lookback_days: 10
+  universe:
+    max_symbols: 300           # cap when scanning the broader NSE universe (Yahoo calls are slow)
+    min_traded_value_cr: 2.0   # pre-filter for the NSE universe (traded value that day, in INR crore)
+
+risk:
+  eligible_series: [EQ]
+  # Series that are known to be trade-to-trade / restricted / non-regular (rejected from the normal delivery shortlist).
+  restricted_series:
+    BE: "trade-to-trade (delivery-only, no intraday squaring)"
+    BZ: "trade-to-trade, non-compliant/surveillance segment"
+    BT: "trade-to-trade (trade for trade) segment"
+    SM: "NSE Emerge SME series"
+    ST: "SME trade-to-trade series"
+    IL: "IPO/initial-listing restricted series"
+    X: "restricted/other non-regular series"
+    XT: "restricted/other non-regular series"
+    Z: "restricted/other non-regular series"
+    ZT: "restricted/other non-regular series"
+    W: "restricted/other non-regular series"
+    P1: "non-regular series"
+  min_avg_traded_value_cr: 2.0      # INR crore, 20-day average of close x volume
+  thin_liquidity_multiple: 2.0      # between 1x and this multiple of the minimum => WARNING (thin)
+  min_avg_volume: 100000            # shares, 20-day average
+  min_price: 20.0                   # INR
+  min_delivery_pct: 30.0            # below this => WARNING (only when delivery data exists)
+  max_spread_pct: 1.0               # only evaluated if bid/ask columns exist
+  repeated_circuit_days: 3          # circuit-like sessions in the lookback window => WARNING
+  surveillance_action: warn         # warn | reject   (ASM/GSM flagged stocks)
+  stale_action: warn                # warn | reject   (stale price data)
+  upper_circuit_action: warn        # warn | reject
