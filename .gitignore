@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+# generated reports are published as workflow artifacts, not committed
+reports/*
+!reports/.gitkeep
+data/.dl_*

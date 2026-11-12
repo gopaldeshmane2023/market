@@ -1,0 +1,6 @@
+pandas>=2.2
+numpy>=1.26
+PyYAML>=6.0
+yfinance>=0.2.54
+requests>=2.31
+pytest>=8.0
