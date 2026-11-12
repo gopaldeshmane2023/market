@@ -1,0 +1,84 @@
+name: TradeSentinel pre-market
+
+on:
+  schedule:
+    # GitHub cron is always UTC. 01:30 UTC = 07:00 Asia/Kolkata (IST has no DST). Monday-Friday.
+    # GitHub may start scheduled runs 5-60 minutes late during busy periods.
+    - cron: "30 1 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      universe:
+        description: "Stocks to screen: watchlist, nse or both (nse/both need NSE files)"
+        type: choice
+        options: [watchlist, both, nse]
+        default: watchlist
+      try_nse_download:
+        description: "Try NSE's public archive download first (best effort; may be blocked from GitHub runners)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read          # least privilege: the workflow only reads the repo
+
+concurrency:
+  group: tradesentinel
+  cancel-in-progress: false
+
+jobs:
+  premarket:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      UNIVERSE: ${{ github.event.inputs.universe || 'watchlist' }}
+      # For scheduled runs set a repository VARIABLE named NSE_AUTO_DOWNLOAD to "true" to enable the download attempt.
+      TRY_DL: ${{ github.event.inputs.try_nse_download || vars.NSE_AUTO_DOWNLOAD || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Unit tests (guards the screening logic)
+        run: python -m pytest tests -q
+
+      - name: Phase 1 - global market report (critical)
+        run: python scripts/global_report.py
+
+      - name: Phase 2 - NSE data (optional; skipped visibly if no files)
+        run: |
+          if [ "$TRY_DL" = "true" ]; then FLAGS="--optional --try-download"; else FLAGS="--optional"; fi
+          python scripts/nse_data.py $FLAGS
+
+      - name: Phase 3 - technical screening
+        run: python scripts/technical_screen.py --universe "$UNIVERSE" --optional
+
+      - name: Phase 4 - risk and exit-eligibility filter
+        run: |
+          if [ -f reports/technical_screen_full.csv ]; then
+            python scripts/risk_filter.py
+          else
+            echo "::warning::Risk filter SKIPPED: no technical screening output (empty universe?)."
+          fi
+
+      - name: Assemble pre-market report
+        if: always()
+        run: python scripts/final_report.py
+
+      - name: Show summary in the run page
+        if: always()
+        run: |
+          if [ -f reports/premarket_report.md ]; then cat reports/premarket_report.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tradesentinel-reports
+          path: reports/
+          retention-days: 30
+          if-no-files-found: warn
