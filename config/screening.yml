@@ -52,3 +52,7 @@ risk:
   surveillance_action: warn         # warn | reject   (ASM/GSM flagged stocks)
   stale_action: warn                # warn | reject   (stale price data)
   upper_circuit_action: warn        # warn | reject
+
+output:
+  min_candidates: 5      # always try to show at least this many ranked candidates (best available that pass the hard safety rules)
+  max_candidates: 10     # never show more than this many

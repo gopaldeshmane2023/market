@@ -67,7 +67,7 @@ def test_full_pipeline_with_nse_data(tmp_path):
     final = pd.read_csv(rep / "final_shortlist.csv")
     assert list(final["symbol"]) == ["GOOD"]
     report = (rep / "premarket_report.md").read_text()
-    assert "### GOOD" in report and "Reasons for caution" in report
+    assert "GOOD" in report and "Cautions" in report and "How to read this report" in report
     assert "stop loss" not in report.lower().replace("no entry prices, targets or stop losses", "")
     status = json.loads((rep / "run_status.json").read_text())
     assert status["nse_data"]["status"] == "DEGRADED" and status["technical_screen"]["status"] == "DEGRADED"   # GHOST has no data
@@ -84,7 +84,8 @@ def test_pipeline_without_nse_data_shortlists_nothing_and_says_why(tmp_path):
     full = pd.read_csv(rep / "technical_screen_full.csv")
     assert not full["shortlisted"].any() and (full.loc[full.data_status == "OK", "series"] == "UNKNOWN").all()
     assert (pd.read_csv(rep / "risk_report.csv")["risk_status"] == "REJECT").all()
-    assert "No NSE series data was available" in (rep / "premarket_report.md").read_text()
+    txt = (rep / "premarket_report.md").read_text()
+    assert "**series is unknown**" in txt and "No stock survived the hard safety rules" in txt
 
 
 def test_universe_nse_requires_nse_data(tmp_path):
@@ -111,3 +112,33 @@ def test_empty_watchlist_skips_cleanly(tmp_path):
     (tmp_path / "config" / "watchlist.csv").write_text("symbol,exchange,notes\n")
     assert ts.main(base + ["--optional"], provider=provider_for(frames)) == 0
     assert json.loads((rep / "run_status.json").read_text())["technical_screen"]["status"] == "SKIPPED"
+
+
+def test_top_candidates_always_ranked_with_near_misses_and_never_hard_rejects(tmp_path):
+    base, rep, frames = build(tmp_path)
+    run_all(base, frames)
+    top = pd.read_csv(rep / "top_candidates.csv")
+    assert top.loc[0, "symbol"] == "GOOD" and top.loc[0, "tier"] == "STRICT_PASS"
+    near = top[top["tier"] == "NEAR_MISS"]
+    assert "DOWN" in set(near["symbol"]) and "trend" in near.set_index("symbol").loc["DOWN", "criteria_missing"]
+    assert not ({"BESYM", "THIN", "GHOST"} & set(top["symbol"]))        # hard rejects are never added to reach a minimum
+    assert (top["rank_score"].diff().dropna() <= 0)[top["tier"].iloc[1:].eq(top["tier"].iloc[:-1].values)].all()
+    import json
+    f = json.loads((rep / "funnel.json").read_text())
+    assert f["screened"] == 5 and f["no_price_data"] == 1 and f["strict_final_shortlist"] == 1
+    assert (rep / "TradeSentinel_results.xlsx").exists()
+    x = pd.ExcelFile(rep / "TradeSentinel_results.xlsx")
+    assert set(x.sheet_names) == {"Top_Candidates", "Why_Filtered", "All_Screened", "Rejected"}
+
+
+def test_minimum_five_filled_from_near_misses():
+    from risk_filter import build_top_candidates
+    rows = []
+    for i in range(12):
+        rows.append(dict(symbol=f"S{i}", risk_status="PASS" if i < 9 else "REJECT", rank_score=90 - i * 3, rel_volume=1.0,
+                         data_status="OK", price_mismatch=False, shortlisted=(i == 0), technical_pass=(i == 0)))
+    top = build_top_candidates(pd.DataFrame(rows), 5, 10)
+    assert len(top) == 5 and top.loc[0, "tier"] == "STRICT_PASS" and (top["tier"].iloc[1:] == "NEAR_MISS").all()
+    assert not set(top["symbol"]) & {"S9", "S10", "S11"}               # rejected ones never fill the quota
+    few = build_top_candidates(pd.DataFrame(rows[:3]), 5, 10)
+    assert len(few) == 3                                                # fewer than 5 eligible => show fewer, not unsafe stocks

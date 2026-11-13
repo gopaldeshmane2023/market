@@ -120,6 +120,21 @@ def _num(x) -> float:
         return float("nan")
 
 
+def rank_score(row: dict, cfg: dict) -> float:
+    """0-100 ranking score with PARTIAL credit, so near-misses can be ordered. It is for sorting only —
+    a high score is not a forecast. Weights: trend 30, MACD 15, RSI 15, volume 15, momentum 15, nearness to 20d high 10."""
+    trend = 0.4 * (row["ema20"] > row["ema50"]) + 0.4 * (row["ema50"] > row["ema200"]) + 0.2 * (row["last_close"] > row["ema20"])
+    lo, hi = float(cfg["rsi"]["min"]), float(cfg["rsi"]["max"])
+    dist = 0.0 if lo <= row["rsi14"] <= hi else (lo - row["rsi14"] if row["rsi14"] < lo else row["rsi14"] - hi)
+    rsi_s = max(0.0, 1.0 - dist / 20.0)
+    macd_s = 1.0 if row["macd"] > row["macd_signal"] else 0.0
+    vol_s = min(max(row["rel_volume"], 0.0) / float(cfg["min_relative_volume"]), 1.0)
+    d, r = row["daily_pct"], row["return_lookback_pct"]
+    mom_s = 0.5 * (np.isfinite(d) and d > 0) + 0.5 * (np.isfinite(r) and r > 0)
+    near = max(0.0, 1.0 + row["dist_high20_pct"] / 10.0) if np.isfinite(row["dist_high20_pct"]) else 0.0
+    return round(100.0 * (0.30 * trend + 0.15 * macd_s + 0.15 * rsi_s + 0.15 * vol_s + 0.15 * mom_s + 0.10 * near), 1)
+
+
 def evaluate_symbol(symbol: str, df: pd.DataFrame | None, nse: dict | None, cfg: dict, ref_date: date,
                     history_source: str = "") -> dict:
     """Evaluate one symbol. `cfg` is the 'technical' section of screening.yml."""
@@ -223,6 +238,9 @@ def evaluate_symbol(symbol: str, df: pd.DataFrame | None, nse: dict | None, cfg:
 
     row["technical_pass"] = bool(history_ok and all(flags.values()))
     row["shortlisted"] = bool(row["technical_pass"] and row["series_ok"] and data_status == "OK" and not row["price_mismatch"])
+    row["criteria_met"] = int(sum(bool(v) for v in flags.values())) if history_ok else 0
+    row["criteria_missing"] = (", ".join(k.replace("_ok", "") for k, v in flags.items() if not v) or "none") if history_ok else "history"
+    row["rank_score"] = rank_score(row, cfg) if history_ok else float("nan")
     row["reasons_pass"] = " | ".join(passes)
     row["reasons_fail"] = " | ".join(fails)
     return row
@@ -286,7 +304,7 @@ FULL_COLUMNS = ["symbol", "series", "data_status", "data_date", "data_age_days",
                 "return_lookback_pct", "delivery_pct", "nse_close", "nse_traded_value_cr", "price_band_pct",
                 "circuit_status", "circuit_up_days", "circuit_down_days", "security_status", "master_series",
                 "surveillance", "price_mismatch", "history_ok", "trend_ok", "rsi_ok", "macd_ok", "volume_ok",
-                "momentum_ok", "series_ok", "technical_pass", "shortlisted", "reasons_pass", "reasons_fail",
+                "momentum_ok", "series_ok", "technical_pass", "shortlisted", "rank_score", "criteria_met", "criteria_missing", "reasons_pass", "reasons_fail",
                 "history_source", "in_watchlist", "watchlist_notes", "nse_source_date", "nse_data_quality"]
 
 

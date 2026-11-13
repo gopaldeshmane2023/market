@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Phase 4 — Risk and exit-eligibility filter.
 
-Reads reports/technical_screen_full.csv and assigns every symbol PASS / WARNING / REJECT with exact reasons.
+Reads reports/technical_screen_full.csv and assigns every symbol PASS / WARNING / REJECT with exact reasons, then
+builds a ranked list of the best candidates that survive the HARD safety rules.
 
 PASS means "no rule below was violated on the data available". It is NOT a safety guarantee:
 EQ series does not guarantee same-day exit or adequate liquidity. Circuits, a missing bid side, thin order-book
@@ -12,13 +13,11 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from common import (add_dir_args, dirs_from_args, fmt, gh_error, gh_warning, load_yaml, now_utc, update_status,
-                    write_json)
+from common import (add_dir_args, dirs_from_args, gh_error, load_yaml, now_utc, update_status, write_json)
 
 PHASE = "risk_filter"
 MISSING = ("", "nan", "none", "unknown", "<na>")
@@ -145,6 +144,45 @@ def evaluate_risk(row: dict, cfg: dict) -> dict:
     return {"status": final, "liquidity_status": liquidity, "reject_reasons": reject, "warning_reasons": warn, "notes": notes}
 
 
+def build_top_candidates(merged: pd.DataFrame, min_n: int, max_n: int) -> pd.DataFrame:
+    """Best-available ranked candidates that pass the HARD safety rules (risk != REJECT, usable fresh data).
+    STRICT_PASS = every bullish criterion met; NEAR_MISS = best remaining by rank_score, with missing criteria listed.
+    Hard rejects (non-EQ, illiquid, no data, lower circuit...) are never added just to reach the minimum."""
+    ok = merged[(merged["risk_status"] != "REJECT") & merged["rank_score"].notna() & (merged["data_status"] == "OK")
+                & (merged["price_mismatch"].astype(str).str.lower() != "true")].copy()
+    ok["tier"] = np.where((ok["shortlisted"] == True) & (ok["technical_pass"] == True), "STRICT_PASS", "NEAR_MISS")   # noqa: E712
+    ok["_t"] = (ok["tier"] == "STRICT_PASS").astype(int)
+    ok = ok.sort_values(["_t", "rank_score", "rel_volume"], ascending=[False, False, False])
+    n = min(max_n, max(min_n, int((ok["_t"] == 1).sum())))
+    top = ok.head(n).drop(columns="_t").reset_index(drop=True)
+    top.insert(0, "rank", range(1, len(top) + 1))
+    return top
+
+
+def build_funnel(merged: pd.DataFrame) -> dict:
+    """Plain counts that explain why stocks dropped out, so an empty result is never a mystery."""
+    has_hist = merged[merged["history_ok"] == True]   # noqa: E712
+    rej = merged["reject_reasons"].fillna("").astype(str)
+    cats = {"series not EQ / unverified": rej.str.contains("Series"),
+            "no usable price data": rej.str.contains("No usable"),
+            "low liquidity / volume / unverifiable": rej.str.contains("liquidity|Low volume|unavailable"),
+            "price below minimum": rej.str.contains("below the minimum"),
+            "lower circuit": rej.str.contains("LOWER circuit")}
+    return {"screened": int(len(merged)), "no_price_data": int((merged["data_status"] == "NO_DATA").sum()),
+            "stale_data": int((merged["data_status"] == "STALE").sum()),
+            "insufficient_history": int((merged["history_ok"] != True).sum()),   # noqa: E712
+            "with_full_indicators": int(len(has_hist)),
+            "failed_trend_ema20_50_200": int((has_hist["trend_ok"] != True).sum()),   # noqa: E712
+            "failed_rsi_50_70": int((has_hist["rsi_ok"] != True).sum()),   # noqa: E712
+            "failed_macd": int((has_hist["macd_ok"] != True).sum()),   # noqa: E712
+            "failed_relative_volume": int((has_hist["volume_ok"] != True).sum()),   # noqa: E712
+            "failed_momentum": int((has_hist["momentum_ok"] != True).sum()),   # noqa: E712
+            "passed_all_indicators": int((merged["technical_pass"] == True).sum()),   # noqa: E712
+            "risk_rejected": int((merged["risk_status"] == "REJECT").sum()),
+            "risk_rejected_by_reason": {k: int(v.sum()) for k, v in cats.items()},
+            "strict_final_shortlist": int(((merged["shortlisted"] == True) & (merged["risk_status"] != "REJECT")).sum())}   # noqa: E712
+
+
 def render_markdown(rep: dict, df: pd.DataFrame) -> str:
     c = rep["counts"]
     L = ["# TradeSentinel — Risk & Exit-Eligibility Report", "", f"Generated: {rep['generated_at_utc']} UTC", "",
@@ -182,7 +220,8 @@ def main(argv: list[str] | None = None) -> int:
     config_dir, _, reports_dir = dirs_from_args(args)
     src = reports_dir / "technical_screen_full.csv"
     try:
-        cfg = load_yaml(config_dir / "screening.yml")["risk"]
+        cfg_all = load_yaml(config_dir / "screening.yml")
+        cfg = cfg_all["risk"]
     except Exception as exc:  # noqa: BLE001
         gh_error(f"risk_filter: invalid configuration: {exc}")
         update_status(reports_dir, PHASE, "FAILED", str(exc))
@@ -206,23 +245,29 @@ def main(argv: list[str] | None = None) -> int:
                         "notes": " | ".join(r["notes"])})
     res = pd.DataFrame(results)
     out = pd.concat([tech[["symbol", "series", "last_close", "avg_traded_value_cr20", "avg_vol20", "delivery_pct",
-                           "circuit_status", "surveillance", "data_status", "technical_pass", "shortlisted"]], res], axis=1)
+                           "circuit_status", "surveillance", "data_status", "technical_pass", "shortlisted", "rank_score"]],
+                     res], axis=1)
     out.to_csv(reports_dir / "risk_report.csv", index=False)
 
     counts = {k: int((out["risk_status"] == k).sum()) for k in ("PASS", "WARNING", "REJECT")}
+    merged = tech.merge(res.assign(symbol=tech["symbol"]), on="symbol")
+    final = merged[(merged["shortlisted"] == True) & (merged["risk_status"] != "REJECT")]   # noqa: E712
+    final.sort_values("rank_score", ascending=False).to_csv(reports_dir / "final_shortlist.csv", index=False)
+
+    out_cfg = cfg_all.get("output", {"min_candidates": 5, "max_candidates": 10})
+    top = build_top_candidates(merged, int(out_cfg["min_candidates"]), int(out_cfg["max_candidates"]))
+    top.to_csv(reports_dir / "top_candidates.csv", index=False)
+    funnel = build_funnel(merged)
+    write_json(reports_dir / "funnel.json", funnel)
+
     rep = {"generated_at_utc": now_utc().isoformat(timespec="seconds"), "symbols": len(out), "counts": counts,
-           "config": cfg, "stocks": out.to_dict("records"),
+           "funnel": funnel, "config": cfg, "stocks": out.to_dict("records"),
            "disclaimer": "PASS is not a safety guarantee; EQ series does not guarantee an exit."}
     write_json(reports_dir / "risk_report.json", rep)
     (reports_dir / "risk_report.md").write_text(render_markdown(rep, out), encoding="utf-8")
-
-    # final shortlist = indicator shortlist that is not REJECTed
-    merged = tech.merge(res.assign(symbol=tech["symbol"]), on="symbol")
-    final = merged[(merged["shortlisted"] == True) & (merged["risk_status"] != "REJECT")]   # noqa: E712
-    final.sort_values("rel_volume", ascending=False).to_csv(reports_dir / "final_shortlist.csv", index=False)
     update_status(reports_dir, PHASE, "OK", f"PASS {counts['PASS']}, WARNING {counts['WARNING']}, REJECT {counts['REJECT']}; "
-                  f"final shortlist {len(final)}")
-    print(f"[risk_filter] {counts} final_shortlist={len(final)}")
+                  f"strict shortlist {len(final)}, ranked top candidates {len(top)}")
+    print(f"[risk_filter] {counts} strict_shortlist={len(final)} top_candidates={len(top)}")
     return 0
 
 

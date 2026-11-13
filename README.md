@@ -22,7 +22,7 @@ tradesentinel/
 │   └── nse_security_master.csv       # placeholder (headers only) -> replace with NSE EQUITY_L.csv
 ├── scripts/
 │   ├── common.py  global_report.py  nse_data.py  technical_screen.py  risk_filter.py  final_report.py
-├── tests/                            # 89 offline tests on synthetic data
+├── tests/                            # 91 offline tests on synthetic data
 ├── reports/.gitkeep                  # outputs land here (not committed)
 ├── requirements.txt  .gitignore  README.md
 ```
@@ -63,6 +63,20 @@ or `both`; `try_nse_download` = attempt NSE's public archive download first.
 The scheduled run is `30 1 * * 1-5` (UTC) = 07:00 IST. GitHub may start it up to ~an hour late. Scheduled runs on
 repositories with no activity for 60 days are paused by GitHub; re-enable them in the Actions tab.
 
+## The two files to open first
+
+After a run, open the artifact and read just these two:
+
+- **`TradeSentinel_results.xlsx`** (Excel) — sheet **Top_Candidates** is your daily list (5-10 ranked stocks); **Why_Filtered**
+  shows how many stocks fell out at each step; All_Screened / Rejected hold everything else with reasons.
+- **`premarket_report.md`** — same list in plain English, with a 30-second "how to read" guide.
+
+**Why the list is never blank:** stocks are ranked by a 0-100 score with partial credit. `STRICT_PASS` = every bullish
+rule met; `NEAR_MISS` = best remaining stock that passed the hard safety rules, with the missing rule named. Hard safety
+rules (EQ series only, liquidity, data quality, no lower circuit) are **never** relaxed to reach the minimum, so on a bad day
+you may see fewer than 5 and the report tells you why. Change the size of the list in `config/screening.yml` → `output`.
+The other CSV files are detail for debugging.
+
 ## Download and read the artifact
 
 Open the finished run → **Artifacts** → `tradesentinel-reports` (kept 30 days) → unzip. Start with
@@ -73,7 +87,9 @@ Open the finished run → **Artifacts** → `tradesentinel-reports` (kept 30 day
 | `premarket_report.md` | run status, global score, sector tilts, shortlist with reasons for selection **and** caution |
 | `global_report.md/.json` | factor-by-factor numbers, formula, methodology, limitations |
 | `nse_data_report.md/.json`, `nse_eod_processed.csv` | NSE source date, download time, validation results |
-| `technical_screen_full.csv`, `technical_shortlist.csv` | every symbol with pass/fail reasons; indicator-pass list |
+| `top_candidates.csv`, `TradeSentinel_results.xlsx` | the ranked daily list (see above) |
+| `technical_screen_full.csv`, `technical_shortlist.csv` | every symbol with pass/fail reasons; `technical_shortlist.csv` is the strict-all-rules list and can be empty |
+| `funnel.json` | counts explaining where stocks dropped out |
 | `risk_report.md/.csv/.json` | PASS / WARNING / REJECT with exact reasons |
 | `final_shortlist.csv` | indicator-pass + EQ + not REJECT |
 | `run_status.json` | OK / DEGRADED / SKIPPED / FAILED per phase |
