@@ -74,7 +74,7 @@ MASTER_COLUMNS_REQUIRED = {"SYMBOL", "SERIES"}
 DATE_FORMATS = ["%d-%b-%Y", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d%b%Y"]
 OUT_COLUMNS = ["symbol", "series", "open", "high", "low", "close", "prev_close", "volume", "traded_value_cr",
                "delivery_qty", "delivery_pct", "price_band_pct", "circuit_status", "security_status", "master_series",
-               "surveillance", "isin", "data_quality", "source_date", "source_file", "source_format", "download_ts"]
+               "surveillance", "isin", "company_name", "data_quality", "source_date", "source_file", "source_format", "download_ts"]
 
 
 # --------------------------------------------------------------------------- reading helpers
@@ -232,6 +232,7 @@ def load_security_master(path: Path) -> tuple[pd.DataFrame | None, str]:
         return None, f"{path.name} has headers but no rows (placeholder) — security status will be UNVERIFIED. " \
                      "Replace it with NSE's EQUITY_L.csv."
     m = pd.DataFrame({"symbol": raw["SYMBOL"].str.upper(), "master_series": raw["SERIES"].str.upper()})
+    m["company_name"] = raw["NAME OF COMPANY"] if "NAME OF COMPANY" in raw.columns else pd.NA
     return m.drop_duplicates("symbol"), f"{len(m)} listed securities loaded from {path.name}."
 
 
@@ -277,6 +278,7 @@ def enrich(df: pd.DataFrame, master: pd.DataFrame | None, band: pd.DataFrame | N
         df["security_status"] = np.where(df["master_series"].notna(), "LISTED_IN_MASTER", "NOT_IN_MASTER")
     else:
         df["master_series"] = pd.NA
+        df["company_name"] = pd.NA
         df["security_status"] = "UNVERIFIED"
     if band is not None:
         b = band.rename(columns={"band": "price_band_pct"}).copy()

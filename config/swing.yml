@@ -1,0 +1,171 @@
+# TradeSentinel — WEEKLY SWING STRATEGY configuration (independent of the daily screen in screening.yml).
+# Every number is a configurable threshold. Starting values are conventional rules of thumb, NOT tuned or proven:
+# use the backtest (scripts/swing_backtest.py) to see whether they add value, and never tune on the same sample.
+
+capital: 800000                    # INR reference capital
+risk_per_trade_pct: 0.25           # maximum planned loss per trade, % of capital
+max_position_pct_of_capital: 25    # ASSUMPTION: cap on a single position's exposure, % of capital
+
+session:
+  close_time_ist: "15:30"          # NSE cash session close
+  completion_buffer_min: 20        # today's daily bar counts as complete only after close + this buffer
+
+data:
+  history_period: "3y"             # Yahoo history requested (needs ~52 completed weeks + 200 daily bars)
+  min_bars: 260
+  max_stale_days: 4                # last COMPLETE daily bar older than this => stale => rejected
+  use_4h: false                    # optional 4-hour confirmation from 1h Yahoo data (unreliable; off by default)
+  max_symbols: 150                 # cap when --universe nse/both
+
+patterns:
+  trend_lookback: 5                # bars used to judge the prior short-term trend
+  min_trend_move_pct: 2.0          # prior move must exceed this % to count as an up/down-trend
+  min_range_atr: 0.5               # candle range must be at least this many ATR (ignores tiny candles)
+  min_body_ratio: 0.10             # body/range minimum for hammer-type candles (below this it is a doji, not a hammer)
+  hammer_lower_body_min: 2.0       # lower wick / body >=
+  hammer_upper_range_max: 0.25     # upper wick / range <=
+  hammer_close_pos_min: 0.60       # body must sit in the top 40% of the range
+  inverted_upper_body_min: 2.0
+  inverted_lower_range_max: 0.15
+  inverted_close_pos_max: 0.40
+  doji_body_ratio_max: 0.10        # dragonfly doji: body/range <=
+  dragonfly_lower_range_min: 0.65
+  dragonfly_upper_range_max: 0.10
+  strong_body_atr: 0.6             # "long" candle: body >= this x ATR
+  star_small_body_ratio: 0.30      # morning/evening star middle body <= this x first body
+  harami_body_ratio: 0.50          # harami inside body <= this x mother body
+  tweezer_tol_atr: 0.10            # tweezer lows/highs equal within this x ATR
+  marubozu_body_ratio: 0.90
+  marubozu_body_atr: 0.8
+  soldiers_body_ratio: 0.50
+  soldiers_upper_range_max: 0.25
+  rejection_upper_range: 0.50      # long upper-wick rejection: upper wick / range >=
+  distribution_rel_vol: 1.5        # high-volume weak-close candle
+  distribution_close_pos_max: 0.35
+  exhaustion_atr: 3.5              # close more than this x ATR above EMA20 ...
+  exhaustion_rsi: 78               # ... or RSI above this, with a wick/bearish body
+  self_confirming: [bullish_engulfing, morning_star, three_inside_up, three_white_soldiers, piercing, bullish_marubozu]
+  strength_weights: {shape: 0.40, volume: 0.20, location: 0.25, context: 0.15}
+  confirmation_bonus: 0.10         # added when a later candle closes above the pattern high
+  min_pattern_strength: 0.35
+
+levels:
+  pivot_left: 3                    # bars to the left/right that must be lower (highs) / higher (lows) for a pivot
+  pivot_right: 3                   # pivots are only KNOWN pivot_right bars later (no look-ahead)
+  lookback: 120
+  zone_tol_pct: 0.6                # zone half-width as % of price ...
+  zone_tol_atr: 0.5                # ... or this x ATR, whichever is larger
+  volume_zone_bars: 60
+  volume_zone_mult: 1.6            # a price bin with this x the average bin volume is a volume-supported zone
+  min_zone_strength: 1.0
+  support_proximity_pct: 1.5       # a pattern low within zone +/- (this % or tolerance) counts as "at support"
+
+breakout:
+  buffer_pct: 0.25                 # close must exceed resistance by this % ...
+  buffer_atr: 0.10                 # ... or this x ATR (whichever is larger)
+  min_body_ratio: 0.50
+  min_close_pos: 0.70              # close in the top 30% of the candle
+  max_upper_ratio: 0.25            # upper wick / range
+  min_rel_vol: 1.30
+  failed_upper_ratio: 0.45         # long upper wick AND weak close => rejection / possible failed breakout
+  failed_close_pos: 0.50
+  potential_pct: 2.0               # within this % below resistance => POTENTIAL_BREAKOUT
+  retest_window: 10                # a confirmed breakout within this many bars can be retested
+  retest_tol_pct: 1.0              # low within this % above the level counts as a revisit
+  retest_hold_tol_pct: 1.0         # low may dip this % below the level and still "hold"
+  fail_tol_pct: 1.0                # a CLOSE this % below the level after a breakout => FAILED_BREAKOUT
+  min_next_resistance_pct: 0.0     # (RR gate in trade_plan decides what is too close)
+
+consolidation:
+  bars: 10
+  max_width_pct: 8.0
+  max_width_atr: 4.0
+  min_rel_vol: 1.30
+
+flag:
+  pole_bars: 5
+  pole_min_pct: 8.0
+  min_flag_bars: 3
+  max_flag_bars: 8
+  max_retrace: 0.50                # flag may retrace at most this fraction of the pole
+  max_width_ratio: 0.60            # flag width <= this x pole gain
+
+triangle:
+  lookback: 40
+  flat_tol_pct: 0.6
+  min_touches: 2
+
+cup:
+  min_bars: 30
+  max_bars: 120
+  min_depth_pct: 12
+  max_depth_pct: 35
+  rim_tol_pct: 5
+  handle_min_bars: 3
+  handle_max_bars: 15
+  handle_max_depth_pct: 12
+
+fvg:
+  lookback: 30
+  displacement_atr: 1.0            # middle candle body >= this x ATR for "strong displacement"
+  displacement_rel_vol: 1.3
+  min_gap_pct: 0.15                # ignore gaps smaller than this % of price
+
+pullback:
+  lookback: 5
+  ema_tol_pct: 0.8                 # low within this % above EMA20/EMA50 counts as a touch
+  min_depth_pct: 3.0
+  max_depth_pct: 15.0
+
+setups:
+  priority: [A, B, F, D, C, E]     # when several setups exist the first in this list is the primary one
+  exhaustion_blocks_confirmed: true
+
+risk:                              # overrides applied on top of screening.yml -> risk when reusing evaluate_risk()
+  min_avg_traded_value_cr: 20.0
+  min_price: 50.0
+  min_avg_volume: 200000
+  thin_liquidity_multiple: 2.0
+  surveillance_action: reject      # ASM/GSM => reject for swing (critical trading restriction)
+  stale_action: reject
+  upper_circuit_action: warn
+  min_delivery_pct: 30.0
+
+liquidity:
+  max_participation_pct: 1.0       # order value / average daily traded value, in %
+  min_order_value: 50000           # if the participation cap allows less than this, reject (position too small to matter)
+  unusual_rel_vol: 4.0             # flag unusually large volume
+  unusual_move_pct: 9.0            # flag unusually large one-day move
+  good_delivery_pct: 45.0
+
+trade_plan:
+  stop_buffer_atr: 0.20            # invalidation = structural level minus this x ATR
+  max_stop_pct: 10.0               # invalidation further than this % below entry => "no reasonable invalidation" => reject
+  min_rr: 1.5                      # ASSUMPTION: minimum distance-to-next-resistance / risk
+  entry_unconfirmed: trigger       # unconfirmed (grade B) setups reference the trigger level, not the close
+
+scoring:
+  weights: {patterns: 25, structure: 20, volume_delivery: 15, liquidity: 15, trend_momentum: 10, sector: 10, global: 5}
+  grade_a_plus: 80
+  grade_a: 68
+  grade_b: 50
+  grade_c: 35
+
+sector:
+  map_file: sector_map.csv         # config/sector_map.csv  (symbol,company,industry,sector,macro_sector,sector_index)
+  benchmark: "^NSEI"
+  outperform_lookback: 20          # bars for stock-vs-sector relative strength
+  min_peers_for_industry: 3
+
+backtest:
+  history_period: "5y"
+  warmup_bars: 260
+  horizons: [1, 2, 3, 5, 7]
+  entry_mode: next_open            # next_open (realistic) | signal_close
+  cost_round_trip_pct: 0.25        # ASSUMPTION: STT + brokerage + exchange/stamp/DP charges, delivery trade
+  slippage_pct_each_side: 0.05     # ASSUMPTION
+  min_sample: 30                   # below this a statistic is shown but marked INSUFFICIENT SAMPLE
+  oos_fraction: 0.40               # last 40% of the timeline is reported separately as out-of-sample; thresholds are NOT tuned
+  liquidity_min_value_cr: 20.0
+  volume_min_rel: 1.3
+  max_symbols: 60

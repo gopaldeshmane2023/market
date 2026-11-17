@@ -1,0 +1,94 @@
+name: TradeSentinel weekly swing
+
+# Independent of premarket.yml: separate config (config/swing.yml), scripts, reports and artifact.
+# It re-runs the global report and NSE ingestion inside this job (artifacts are not shared between workflows).
+
+on:
+  schedule:
+    # GitHub cron is UTC. 14:00 UTC = 19:30 IST, Mon-Fri: after the 15:30 close so daily candles are COMPLETE
+    # (and NSE's end-of-day files are normally published). GitHub may start runs late, which only helps.
+    - cron: "0 14 * * 1-5"
+    # Saturday 10:00 IST (04:30 UTC): weekend review incl. the backtest.
+    - cron: "30 4 * * 6"
+  workflow_dispatch:
+    inputs:
+      universe:
+        description: "Stocks to scan: watchlist, nse or both (nse/both need NSE files)"
+        type: choice
+        options: [watchlist, both, nse]
+        default: watchlist
+      mode:
+        description: "daily or weekend"
+        type: choice
+        options: [daily, weekend]
+        default: daily
+      run_backtest:
+        description: "Also run the historical pattern backtest (slower, 2-5 minutes)"
+        type: boolean
+        default: false
+      try_nse_download:
+        description: "Try NSE's public archive download first (best effort; may be blocked from GitHub runners)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tradesentinel-swing
+  cancel-in-progress: false
+
+jobs:
+  swing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      UNIVERSE: ${{ github.event.inputs.universe || 'watchlist' }}
+      MODE: ${{ github.event.inputs.mode || (github.event.schedule == '30 4 * * 6' && 'weekend') || 'daily' }}
+      RUN_BT: ${{ github.event.inputs.run_backtest || (github.event.schedule == '30 4 * * 6' && 'true') || 'false' }}
+      TRY_DL: ${{ github.event.inputs.try_nse_download || vars.NSE_AUTO_DOWNLOAD || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Unit tests (pattern, breakout, look-ahead and risk-gate tests)
+        run: python -m pytest tests -q
+
+      - name: Global market report (context for the swing score; non-critical here)
+        continue-on-error: true
+        run: python scripts/global_report.py
+
+      - name: NSE data (series, delivery %, price bands; optional)
+        run: |
+          if [ "$TRY_DL" = "true" ]; then FLAGS="--optional --try-download"; else FLAGS="--optional"; fi
+          python scripts/nse_data.py $FLAGS
+
+      - name: Swing scan (completed daily candles only)
+        run: python scripts/swing_scan.py --universe "$UNIVERSE" --mode "$MODE" --optional
+
+      - name: Pattern backtest
+        if: env.RUN_BT == 'true'
+        run: python scripts/swing_backtest.py --universe "$UNIVERSE" --optional
+
+      - name: Show reports on the run page
+        if: always()
+        run: |
+          for f in reports/swing_report.md reports/swing_backtest.md; do
+            if [ -f "$f" ]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; echo >> "$GITHUB_STEP_SUMMARY"; fi
+          done
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tradesentinel-swing-reports
+          path: reports/
+          retention-days: 30
+          if-no-files-found: warn

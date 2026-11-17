@@ -1,0 +1,31 @@
+# TradeSentinel sector map — STARTER ONLY, maintained by you. Verify before relying on it.
+# symbol: NSE trading symbol. macro_sector must match a sector name in config/market_impact.yml (or be blank).
+# sector_index: Yahoo Finance ticker of the NSE sector index (free but not guaranteed: if it returns no data the sector is reported UNKNOWN, never guessed).
+symbol,company,industry,sector,macro_sector,sector_index
+TCS,Tata Consultancy Services,IT Services,IT,IT,^CNXIT
+INFY,Infosys,IT Services,IT,IT,^CNXIT
+HCLTECH,HCL Technologies,IT Services,IT,IT,^CNXIT
+WIPRO,Wipro,IT Services,IT,IT,^CNXIT
+TECHM,Tech Mahindra,IT Services,IT,IT,^CNXIT
+HDFCBANK,HDFC Bank,Private Bank,Banks,Private banks,^NSEBANK
+ICICIBANK,ICICI Bank,Private Bank,Banks,Private banks,^NSEBANK
+KOTAKBANK,Kotak Mahindra Bank,Private Bank,Banks,Private banks,^NSEBANK
+AXISBANK,Axis Bank,Private Bank,Banks,Private banks,^NSEBANK
+SBIN,State Bank of India,Public Sector Bank,Banks,PSU banks,^CNXPSUBANK
+BANKBARODA,Bank of Baroda,Public Sector Bank,Banks,PSU banks,^CNXPSUBANK
+PNB,Punjab National Bank,Public Sector Bank,Banks,PSU banks,^CNXPSUBANK
+SUNPHARMA,Sun Pharmaceutical,Pharmaceuticals,Pharma,Pharma,^CNXPHARMA
+DRREDDY,Dr Reddys Laboratories,Pharmaceuticals,Pharma,Pharma,^CNXPHARMA
+CIPLA,Cipla,Pharmaceuticals,Pharma,Pharma,^CNXPHARMA
+MARUTI,Maruti Suzuki,Passenger Vehicles,Auto,Auto,^CNXAUTO
+M&M,Mahindra & Mahindra,Automobiles,Auto,Auto,^CNXAUTO
+BAJAJ-AUTO,Bajaj Auto,Two Wheelers,Auto,Auto,^CNXAUTO
+HINDUNILVR,Hindustan Unilever,Household Products,FMCG,FMCG,^CNXFMCG
+ITC,ITC,Diversified FMCG,FMCG,FMCG,^CNXFMCG
+NESTLEIND,Nestle India,Packaged Foods,FMCG,FMCG,^CNXFMCG
+TATASTEEL,Tata Steel,Steel,Metals,Metals,^CNXMETAL
+JSWSTEEL,JSW Steel,Steel,Metals,Metals,^CNXMETAL
+HINDALCO,Hindalco Industries,Aluminium and Copper,Metals,Metals,^CNXMETAL
+RELIANCE,Reliance Industries,Oil Gas and Telecom,Energy,Oil and gas,^CNXENERGY
+ONGC,Oil and Natural Gas Corporation,Oil and Gas Exploration,Energy,Oil and gas,^CNXENERGY
+DLF,DLF,Real Estate,Realty,Realty,^CNXREALTY

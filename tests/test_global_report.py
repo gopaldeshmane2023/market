@@ -191,7 +191,10 @@ def test_fetch_exception_is_contained(cfg):
 
 def test_main_writes_reports_and_status(cfg, tmp_path):
     def fetch(ticker, period):
-        return frame(4.3, 4.25) if ticker == "^TNX" else frame(101, 100)
+        # dates relative to the real clock: g.main() uses the current time, so fixed dates would go stale
+        idx = pd.bdate_range(end=pd.Timestamp.now(tz="UTC").normalize(), periods=2)
+        vals = [4.25, 4.3] if ticker == "^TNX" else [100, 101]
+        return pd.DataFrame({"Close": vals}, index=idx)
     rc = g.main(["--reports-dir", str(tmp_path)], fetcher=fetch)
     assert rc == 0
     md = (tmp_path / "global_report.md").read_text()

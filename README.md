@@ -14,15 +14,19 @@ has no web app, database, broker integration or order placement. No API keys, no
 ```
 tradesentinel/
 ├── .github/workflows/premarket.yml   # Mon-Fri 07:00 IST + manual run
+├── .github/workflows/swing.yml       # weekdays 19:30 IST (after close) + Saturday review + manual run
 ├── config/
 │   ├── market_impact.yml             # global-score weights, directions, risk flags, sector sensitivities
-│   ├── screening.yml                 # every technical + risk threshold
+│   ├── screening.yml                 # every technical + risk threshold (daily screen)
+│   ├── swing.yml                     # WEEKLY SWING strategy thresholds (separate)
+│   ├── sector_map.csv                # your symbol -> industry/sector/sector-index map (starter, verify)
 │   └── watchlist.csv                 # YOUR symbols (symbol,exchange,notes)
 ├── data/
 │   └── nse_security_master.csv       # placeholder (headers only) -> replace with NSE EQUITY_L.csv
 ├── scripts/
 │   ├── common.py  global_report.py  nse_data.py  technical_screen.py  risk_filter.py  final_report.py
-├── tests/                            # 91 offline tests on synthetic data
+│   └── swing_patterns.py  swing_levels.py  swing_engine.py  swing_scan.py  swing_backtest.py   # weekly swing
+├── tests/                            # 142 offline tests on synthetic data
 ├── reports/.gitkeep                  # outputs land here (not committed)
 ├── requirements.txt  .gitignore  README.md
 ```
@@ -156,6 +160,77 @@ positive daily and 5-day momentum, ≥210 bars, EQ only. Indicators are computed
 Risk: **REJECT** for non-EQ (BE/BZ/SM… known-restricted, unknown = rejected until verified), missing data, price <₹20,
 average traded value <₹2 cr or volume <1 lakh shares, lower circuit. **WARNING** for thin liquidity, low/missing delivery %,
 upper circuit, repeated circuits, ASM/GSM, stale data, Yahoo-vs-NSE price mismatch, not in security master.
+
+
+## Weekly Swing Strategy (separate from the daily screen)
+
+An independent 1-7 session price-action scanner. It reuses the existing data modules (`nse_data`, `technical_screen`
+indicators/history/watchlist, `risk_filter` series-liquidity-circuit-surveillance gates, `global_report`) but has its own
+config (`config/swing.yml`), scripts, reports and workflow (`swing.yml`). It does not touch intraday screening or the
+daily pipeline.
+
+**The one rule that matters:** a stock near resistance is **not** a confirmed breakout. `CONFIRMED_BREAKOUT` requires a
+*completed* daily candle that **closes** above resistance + buffer (max of 0.25% or 0.1 ATR), with body/close-position/
+upper-wick/volume quality checks. Statuses are never mixed: `POTENTIAL_BREAKOUT`, `BREAKOUT_PENDING_CLOSE`
+(today's candle still forming: never confirmed), `CONFIRMED_BREAKOUT`, `BREAKOUT_RETEST`, `FAILED_BREAKOUT`,
+`RESISTANCE_REJECTION` (crossed intraday but closed below, or long upper wick with a weak close). Resistance comes from
+bars up to the *previous* day only, pivots are used only after their right-hand bars have closed, and weekly values use
+completed weeks only, so no future candle ever confirms an earlier date (tests assert this).
+
+| Piece | What it does |
+|---|---|
+| `swing_patterns.py` | 22 candle patterns from explicit formulas (hammer, engulfing, morning star ... shooting star, distribution, exhaustion), each with shape/volume/location/context strength and a formula explanation |
+| `swing_levels.py` | support/resistance **zones** (pivots, 20/50-day highs/lows, volume-supported zones, repeated rejections), breakout/retest/failed logic, three-candle FVGs, weekly trend, flag/pennant/triangle/cup |
+| `swing_engine.py` | setups kept separate: A confirmed breakout, B retest, C support reversal, D pullback in uptrend, E consolidation/flag/triangle/cup breakout, F FVG continuation; formula-derived invalidation and reward/risk |
+| `swing_scan.py` | hard gates -> 0-100 score -> grade A+/A/B/C/Rejected; reports |
+| `swing_backtest.py` | walk-forward test of each pattern vs an unconditional baseline |
+
+**Hard gates beat the score:** not EQ, liquidity below Rs20 cr 20-day average traded value, price below Rs50, ASM/GSM,
+lower circuit, stale/missing data, invalidated setup (bearish engulfing, evening star, failed breakout, rejection ...),
+no reasonable invalidation (none below entry, or >10% away), next resistance too close (reward/risk below 1.5).
+Unconfirmed setups and early reversals are capped at **B**. A+ also needs a measurable reward/risk and no medium warnings.
+
+**Liquidity and capital:** participation = order value / 20-day average traded value (Rs, not share count). Cap 1%.
+For each candidate the report shows what an Rs8 lakh order would be as % of daily turnover and the maximum order at the
+cap. Position size = min(risk budget 0.25% of capital / stop distance, 25% of capital, participation cap). Turnover is **not**
+order-book depth; depth is not available free, so execution capacity is always marked *not verified*.
+
+**Reference levels, not targets:** invalidation = structural low of the setup minus 0.2 ATR; "next resistance" is shown
+only as a distance for reward/risk. If nothing overhead is found, reward/risk is `n/a` (cannot be A+). Nothing is
+predicted.
+
+**Sector and global context** (supporting, 10% + 5% of the score): sector trend and stock-vs-sector relative strength need
+`config/sector_map.csv` (symbol -> sector index ticker, a starter file you must verify) and Yahoo sector-index data
+(e.g. `^CNXIT`); if either is missing the factor is shown as **UNKNOWN** and the score is renormalised, never invented.
+Global alignment is read from the existing `global_report.json`. Nifty direction uses `^NSEI`.
+
+### Run it
+
+*Actions -> **TradeSentinel weekly swing** -> Run workflow*: `universe` (watchlist/nse/both), `mode` (daily/weekend),
+`run_backtest`, `try_nse_download`. Scheduled: weekdays 19:30 IST (after the close, so candles are complete) and Saturday
+10:00 IST with the backtest. Download artifact `tradesentinel-swing-reports`; read `swing_report.md` first.
+Files: `swing_report.md/json`, `swing_candidates.csv` (A+/A/B/C), `swing_rejected.csv` (every reason),
+`swing_backtest.md/csv/json`, `swing_backtest_trades.csv`. Locally: `python scripts/swing_scan.py --universe watchlist`.
+
+**Completeness rule:** Yahoo has no "candle complete" flag, so a candle dated today is treated as complete only after
+15:30 IST + 20 minutes; otherwise it is excluded and a crossing can only be reported as `BREAKOUT_PENDING_CLOSE`.
+When you supply the NSE EOD file its date/close are cross-checked against the last Yahoo bar. Run it after ~19:30 IST.
+
+### Backtest: read it before trusting a grade
+
+`swing_backtest.py` records every setup using only data available that day, enters at the **next open**, and measures
+1/2/3/5/7-session net returns (costs and slippage are *assumptions* in `swing.yml`), max favourable/adverse excursion,
+invalidation hits and stop-adjusted returns; shows win rate, average, median, profit factor (only with n >= 30), max
+drawdown, regime (Nifty trend) splits, and edge vs. an all-bars baseline with a rough t-stat. It compares each pattern
+alone vs +volume, +trend, +sector, +liquidity and combined, and reports in-sample vs out-of-sample (last 40% by date);
+**thresholds are not tuned on any sample.** Known biases: survivorship (today's symbols only), overlapping signals
+(optimistic t-stats), no delivery history, sector variant only where index data exists. With too few symbols or setups
+the report says **VALIDATION INCOMPLETE / INSUFFICIENT SAMPLE** instead of drawing conclusions. A well-known pattern is not
+evidence of profit: on pure random data the module reports no edge, as it should.
+
+### Swing data sources and limits
+Same free sources as above (Yahoo daily OHLCV, NSE official files you supply, your sector map). 4-hour confirmation is
+optional/off (`use_4h: false`): free Yahoo intraday history is short and unreliable, so it is not used by default.
 
 ## Tests
 
